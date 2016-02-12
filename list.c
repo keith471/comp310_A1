@@ -81,6 +81,10 @@ int del(int index) {
     return 0;
 }
 
+pid_t getLast() {
+    return tail->pid;
+}
+
 void showJobs() {
     Node *curr = head;
     int index = 0;

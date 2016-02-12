@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "helpers.h"
 #include "list.h"
 
@@ -23,6 +24,7 @@ typedef struct {
 } cmdTuple;
 
 cmdTuple history[HISTORY_SIZE];
+int cmdcount = 1;
 
 int getcmd(char *prompt, char *args[], int *background, cmd_type *type, int *redirectIdx) {
     int length, i = 0;
@@ -176,7 +178,7 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 // 0 --> successful command; command added to history
 // -1 --> command not added to history for whatever reason
 // 1 --> exit the program
-int processCommand(char **args, int numargs, int cmdcount, cmd_type type, int bg, int redirectIdx) {
+void processCommand(char **args, int numargs, cmd_type type, int bg, int redirectIdx) {
     
     // Assume command will be successful
     int saveToHistory = 1;
@@ -207,9 +209,9 @@ int processCommand(char **args, int numargs, int cmdcount, cmd_type type, int bg
 				printf("\n");
 
 				// Recursively process the command
-				int result = processCommand(cmd->args, cmd->numargs, cmdcount, cmd->type, cmd->bg, cmd->redirectIdx);
+				processCommand(cmd->args, cmd->numargs, cmd->type, cmd->bg, cmd->redirectIdx);
 				
-				return result;	// Return the result of the recursive call to main	
+				return;	
 			} else {
 				printf("there is an error with that command - please try another\n");
 			}
@@ -271,9 +273,30 @@ int processCommand(char **args, int numargs, int cmdcount, cmd_type type, int bg
     } else if (type == JOBS) {
         showJobs();
     } else if (type == FG) {
-    
+        // Get process id of the job to move to the foreground
+        pid_t procid;
+        if (args[1] == NULL) {
+            procid = getLast();
+            printf("Getting the latest process added to background...\n");
+        } else {
+            procid = atoi(args[1]);
+            if (procid == 0) {
+                printf("Error: invalid argument passed to fg\n");
+                return;
+            }
+        }
+        
+        // See if process is still running        
+        kill(procid, 0);
+        if (errno == ESRCH) {
+            // The process doesn't exist
+            printf("Process %i has already terminated\n", procid);
+        } else {
+            int status = 0;
+            waitpid(procid, &status, 0);
+        }
     } else if (type == EXIT) {
-        return 1;	// Return 1 to main, causing the shell to exit
+        exit(EXIT_SUCCESS);
     } else if (type == EXTERNAL) {
     
         int result = runCmd(args, numargs, cmdcount, bg, redirectIdx);
@@ -284,11 +307,12 @@ int processCommand(char **args, int numargs, int cmdcount, cmd_type type, int bg
     
     // Add the command to history
     if (saveToHistory) {
+        printf("Saving to history: %s\n", args[0]);
         addToHistory(cmdcount, 0, type, bg, redirectIdx, args, numargs);
-        return 0;
+
+        cmdcount++;
     }
     
-    return -1;
 }
 
 /*void handle_SIGTSTP(int sig) {
@@ -313,7 +337,6 @@ int main() {
     int bg;
     int redirectIdx;
     int cnt;
-    int cmdcount = 1;
     cmd_type type;;
     int result = 0;
     
@@ -340,18 +363,9 @@ int main() {
 		printf("\n\n");
 		// END TESTING *************************************
 		
-		result = processCommand(args, cnt, cmdcount, type, bg, redirectIdx);
+		processCommand(args, cnt, type, bg, redirectIdx);
 		
 		//freecmd(args, cnt);
-		
-		// Conditionally increment cmdcount based on return of processCommand
-		if (result == 0) {
-		    // We saved the command to history and thus should increment cmdcount
-		    cmdcount++;
-		} else if (result == 1) {
-		    // Exit the program
-		    break;
-		}
 				 
 	}
 		

@@ -8,5 +8,6 @@ typedef struct _Node {
 void push(pid_t pid, char **args, int numargs);
 int find(pid_t pid);
 int del(int index);
+pid_t getLast();
 //void printCommand(char **args, int numargs);
 void showJobs();
