@@ -80,7 +80,7 @@ int getcmd(char *prompt, char *args[], int *background, cmd_type *type, int *red
     
     args[i] = NULL;
     
-    free(line);	// Free line
+    //free(line);	// Free line
 
     return i;
 }
@@ -142,12 +142,19 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 			close(1);	// Close stdout
 			open(args[redirectIdx+1], O_WRONLY|O_CREAT, 0666);		// Rewire std out to the
 																	// given file
+			// dup2()
+			// note file desriptor for terminal
+			// close(1)
+			// open and redirect output
+			// close(1)
+			// dup again to rewire stdin
 			err = execvp(newargs[0], newargs);
 			
 			if (err == -1) {
 		        printf("Error: %s\n", strerror(errno));
 		        printf("Exiting child process...\n");
-		        exit(EXIT_FAILURE);
+		        return err;
+		        exit(11);
 		    }
 		    
 		} else {
@@ -156,7 +163,7 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 		    if (err == -1) {
 		        printf("Error: %s\n", strerror(errno));
 		        printf("Exiting child process...\n");
-		        exit(EXIT_FAILURE);
+		        exit(11);
 		    }
 		}
 	} else {
@@ -164,6 +171,11 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 		if (!bg) {
 			int status = 0;
 			waitpid(childPID, &status, 0);
+			if (status == 11) {
+			    return -1;
+			} else {
+			    return 0;
+			}
 		} else {
 		    printf("Process ID: %i\n", childPID);
 		    addToJobs(childPID, args, numargs);
@@ -209,7 +221,7 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
 				printf("\n");
 
 				// Recursively process the command
-				processCommand(cmd->args, cmd->numargs, cmd->type, cmd->bg, cmd->redirectIdx);
+				processCommand(cmd->args, cmd->numargs, cmd->type, (cmd->bg || bg), cmd->redirectIdx);
 				
 				return;	
 			} else {
@@ -327,8 +339,7 @@ void handle_SIGINT(int sig) {
     signal(SIGTSTP, handle_SIGINT);
     
     printf("\nSignal %d received\n", sig);
-    printf("Exiting...\n");
-    exit(EXIT_SUCCESS);
+    printf("To exit, use 'exit'\n");
 }
 
 int main() {
