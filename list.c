@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include "list.h"
 
 #define MAX_LINE 100
@@ -29,12 +31,10 @@ int find(pid_t pid) {
     int i = 0;
     for (Node* it=head; it != NULL; it=it->next) {
         if (it->pid == pid) {
-            printf("process %i found at link %d\n", it->pid, i);
             return i;
         }
         i++;
     }
-    printf("couldn't find process %i\n", pid);
     return -1;
 }
 
@@ -65,10 +65,14 @@ int del(int index) {
     if (delete == NULL) {
         return -1;
     }
-
+    
     it->next = delete->next;
     free(delete->line);
     free(delete);
+    
+    if (it->next == NULL) {
+        tail = it;
+    }
 
     return 0;
 }
@@ -92,7 +96,6 @@ pid_t getLast() {
 
 void showJobs() {
     Node *curr = head;
-    int index = 0;
     while (curr != NULL) {
     	// WNOHANG causes waitpid to return immediately. 0 is returned if the child with
     	// given pid exists
@@ -100,10 +103,12 @@ void showJobs() {
             printf("[%i] ", curr->pid);
             printf("%s", curr->line);
             curr = curr->next;
-            index++;
         } else {
+            int index = find(curr->pid);
             curr = curr->next;	// Get the next node before deleting the current one
-            del(index);
+            if (index != -1) {
+                del(index);
+            }
         }
     }
 }
