@@ -73,8 +73,21 @@ int del(int index) {
     return 0;
 }
 
+void delAll() {
+    Node* curr = head;
+    // Continuously delete the first element in the list until there are no elements left
+    while (curr != NULL) {
+        curr = curr->next;
+        del(0);
+    }
+}
+
 pid_t getLast() {
-    return tail->pid;
+    if (tail != NULL) {
+        return tail->pid;
+    } else {
+        return -1;
+    }
 }
 
 void showJobs() {
@@ -87,10 +100,10 @@ void showJobs() {
             printf("[%i] ", curr->pid);
             printf("%s", curr->line);
             curr = curr->next;
+            index++;
         } else {
             curr = curr->next;	// Get the next node before deleting the current one
             del(index);
         }
-        index++;
     }
 }

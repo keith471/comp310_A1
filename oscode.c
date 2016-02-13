@@ -10,6 +10,8 @@
 #include "list.h"
 
 #define MAX_LINE 100	// 100 characters for a line. This should be plenty
+#define MAX_PATH 100
+#define PATH_INCREMENT 10
 #define HISTORY_SIZE 10
 #define ERR_CMDS_SIZE 20
 #define MAX_ARGS 20
@@ -108,14 +110,6 @@ char* getcmd(char *prompt) {
     return line;
 }
 
-void freecmd(char *args[20], int numargs) {
-    for (int i = 0; i < numargs; i++) {
-        free(args[i]);
-    }
-    
-    free(args);
-}
-
 cmdTuple* getHistory(int cmd) {
     for (int i = 0; i < HISTORY_SIZE; i++) {
         if (history[i]->cmdnum == cmd) {
@@ -160,8 +154,19 @@ int erroneousCmd(int cmdnum) {
     return 0;
 }
 
+void delHistory(int index) {
+    free(history[index]->line);
+    free(history[index]);
+}
+
 void addToHistory(char *line, int cmdnum, cmd_type type, int bg, int redirectIdx) {
     int insertIndex = (cmdnum - 1) % HISTORY_SIZE;
+    // Check if the history array is full. If so, then we are clearly overwriting an entry
+    // and need to free the associated memory
+    if (history[HISTORY_SIZE-1] != NULL) {
+        printf("History array is full\n");
+        delHistory(insertIndex);
+    }
     cmdTuple *hist = malloc(sizeof(cmdTuple));
     hist->line = malloc(MAX_LINE*sizeof(char));
     hist->cmdnum = cmdnum;
@@ -186,8 +191,25 @@ void addToJobs(pid_t pid, char *line) {
     push(pid, line);
 }
 
-void cleanup() {
+void cleanup(char *line) {
+    printf("Cleaning up...\n");
+    // Clear history
+    for(int i = 0; i < HISTORY_SIZE; i++) {
+        if (history[i] != NULL) {
+            delHistory(i);
+        }
+    }
+    
+    // Clear jobs
+    delAll();
+    
+    // Clear line
+    free(line);
+    
+	// Unmap the shared variable
 	munmap(erroneous_cmd_num, sizeof(*erroneous_cmd_num));
+	
+	printf("Done clean-up\n");
 }
 
 int runCmd(char *line, char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
@@ -301,6 +323,10 @@ void processCommand(char *line, int bg_override) {
     int saveToHistory = 1;
     
     if (type == HISTORY) {
+        if (redirectIdx) {
+            printf("Redirection of the 'history' command is not implemented\n");
+            printf("Printing history\n");
+        }
         // Loop through history and print the number and command
         printHistory();
     } else if (type == HISTACCESS) {
@@ -313,7 +339,7 @@ void processCommand(char *line, int bg_override) {
 			if (!cmd->error) {
 				// Not erroneous
 				// Print the command to be run to the screen
-				printf("%s\n", cmd->line);
+				printf("%s", cmd->line);
 
 				// Recursively process the command
 				processCommand(cmd->line, bg);
@@ -328,7 +354,7 @@ void processCommand(char *line, int bg_override) {
 		        
     } else if (type == PWD) {
     
-        size_t size = 100;	// 100 bytes should be plenty for the path
+        size_t size = MAX_PATH;	// 100 bytes should be plenty for the path
         char *buf = (char *) malloc(size);	
         char *pwd = getcwd(buf, size);
         
@@ -339,8 +365,8 @@ void processCommand(char *line, int bg_override) {
         int i = 0;
         while (pwd == NULL && i < 10) {
             free(buf);
-            size += 10;
-            buf = (char *) malloc(size);
+            size += PATH_INCREMENT;
+            buf = malloc(size);
             pwd = getcwd(buf, size);
         }
         
@@ -369,9 +395,9 @@ void processCommand(char *line, int bg_override) {
         int result = chdir(dir);
         
         if (result == -1) {
-            printf("Error\n");
+            printf("Error: %s\n", strerror(errno));
         } else {
-            printf("Changed directory to: %s\n", dir);
+            printf("Now in: %s\n", dir);
         }
     
     } else if (type == JOBS) {
@@ -388,19 +414,27 @@ void processCommand(char *line, int bg_override) {
             if (procid == 0) {
                 printf("Error: invalid argument passed to fg: %s\n", args[1]);
                 return;
+            } else if (procid < 0) {
+                printf("Error: process IDs must be positive\n");
+                return;
             }
         }
         
-        // 2. See if process is still running and handle     
-        kill(procid, 0);
-        if (errno == ESRCH) {
-            printf("Process %i has already terminated\n", procid);
+        if (procid < 0) {
+            printf("No background jobs\n");
         } else {
-            int status = 0;
-            waitpid(procid, &status, 0);
+			// 2. See if process is still running and handle     
+			kill(procid, 0);
+			if (errno == ESRCH) {
+				printf("Process %i has already terminated\n", procid);
+			} else {
+				int status = 0;
+				waitpid(procid, &status, 0);
+			}
         }
     } else if (type == EXIT) {
-        cleanup();
+        cleanup(line);
+        printf("Exiting...\n");
         exit(EXIT_SUCCESS);
     } else if (type == EXTERNAL) {
         int err = runCmd(line, args, numargs, cmdcount, bg, redirectIdx);
@@ -486,12 +520,6 @@ void handle_SIGUSR1(int sig) {
 }
 
 int main() {
-
-    //char *args[20];
-    //int bg;
-    //int redirectIdx;
-    //int cnt;
-    //cmd_type type;;
     
     // Set up signals and hangling ****************
     //void handle_SIGTSTP(int);
@@ -511,13 +539,11 @@ int main() {
 	// Loop until user exits ****************
     while (1) {
         
-        //type = EXTERNAL; 		// Assume commands are external by default
-        //redirectIdx = -1;		// Assume no redirection by default
-        
         char *line = getcmd("\n>>  ");	// Read a line from stdin
 		
 		processCommand(line, 0);/*, cnt, type, bg, redirectIdx);*/
 		
+		// free the line
 		free(line);
 				 
 	}     
