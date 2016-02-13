@@ -10,11 +10,13 @@
 #include "helpers.h"
 #include "list.h"
 
-const int HISTORY_SIZE = 10;
-const int ERR_CMDS_SIZE = 20;
-const int MAX_ARGS = 20;
-const int EXECVP_FAIL = 100;
-const int EXECVP_UNDEF_ERR = 101;
+#define MAX_LINE 100	// 100 characters for a line. This should be plenty
+#define HISTORY_SIZE 10
+#define ERR_CMDS_SIZE 20
+#define MAX_ARGS 20
+#define EXECVP_FAIL 100
+#define EXECVP_UNDEF_ERR 101
+
 
 typedef enum {HISTORY, HISTACCESS, PWD, CD, JOBS, EXIT, FG, EXTERNAL} cmd_type;
 
@@ -24,38 +26,35 @@ typedef struct {
     cmd_type type;
     int bg;
     int redirectIdx;
-    char *args[20];
+    char *line;
     int numargs;
 } cmdTuple;
 
-cmdTuple history[HISTORY_SIZE];
+cmdTuple *history[HISTORY_SIZE];
 int err_cmds[ERR_CMDS_SIZE] = {0};
 int errcount = 0;
 int cmdcount = 1;
 static int *erroneous_cmd_num;	// A shared variable
 
+// Parses line into args and returns the number of arguments in the command
+// Also determines if the command is meant to run in the background, if it is a redirect,
+// and the general type of the command
+int parseline(char *line, char *args[], int *background, cmd_type *type, int *redirectIdx) {
 
-int getcmd(char *prompt, char *args[], int *background, cmd_type *type, int *redirectIdx) {
-    int length, i = 0;
+	int i = 0;
     char *token, *loc;
-    char *line = NULL;
-    size_t linecap = 0;
-	
-    printf("%s", prompt);
-    length = getline(&line, &linecap, stdin);
-
-    if (length <= 0) {
-        exit(-1);
-    }
-
+    
+    char *linecpy = malloc(MAX_LINE*sizeof(char));
+    strcpy(linecpy, line);
+    
     // Check if background is specified..
-    if ((loc = index(line, '&')) != NULL) {
+    if ((loc = index(linecpy, '&')) != NULL) {
         *background = 1;
         *loc = ' ';
     } else
         *background = 0;
 
-    while ((token = strsep(&line, " \t\n")) != NULL) {
+    while ((token = strsep(&linecpy, " \t\n")) != NULL) {
         for (int j = 0; j < strlen(token); j++)
             if (token[j] <= 32)
                 token[j] = '\0';
@@ -89,9 +88,25 @@ int getcmd(char *prompt, char *args[], int *background, cmd_type *type, int *red
     
     args[i] = NULL;
     
-    //free(line);	// Free line
-
+    free(linecpy);
+    
     return i;
+}
+
+// Returns the command string entered by the user
+char* getcmd(char *prompt) {
+    int length;
+    char *line = NULL;
+    size_t linecap = 0;
+	
+    printf("%s", prompt);
+    length = getline(&line, &linecap, stdin);
+
+    if (length <= 0) {
+        exit(-1);
+    }
+    
+    return line;
 }
 
 void freecmd(char *args[20], int numargs) {
@@ -104,8 +119,8 @@ void freecmd(char *args[20], int numargs) {
 
 cmdTuple* getHistory(int cmd) {
     for (int i = 0; i < HISTORY_SIZE; i++) {
-        if (history[i].cmdnum == cmd) {
-            return &history[i];
+        if (history[i]->cmdnum == cmd) {
+            return history[i];
         }
     }
     
@@ -115,8 +130,8 @@ cmdTuple* getHistory(int cmd) {
 int updateHistory(int cmdnum) {
     printf("Updating history\n");
     for (int i = 0; i < HISTORY_SIZE; i++) {
-        if (history[i].cmdnum == cmdnum) {
-            history[i].error = 1;
+        if (history[i]->cmdnum == cmdnum) {
+            history[i]->error = 1;
             return 1;
         }
     }
@@ -126,9 +141,10 @@ int updateHistory(int cmdnum) {
 
 void printHistory() {
 	int i = 0;
-	while ((history[i].args[0] != NULL) && i < 10) {
-		printf("(%i) ", history[i].cmdnum);
-		printCommand(history[i].args, history[i].numargs);
+	while ((history[i] != NULL) && i < 10) {
+		printf("(%i) ", history[i]->cmdnum);
+		printf("%s", history[i]->line);
+		//printCommand(history[i].args, history[i].numargs);
 		i++;
 	}
 	if (i == 0) {
@@ -145,21 +161,22 @@ int erroneousCmd(int cmdnum) {
     return 0;
 }
 
-void addToHistory(int cmdnum, cmd_type type, int bg, int redirectIdx, char **args, int numargs) {
+void addToHistory(char *line, int cmdnum, cmd_type type, int bg, int redirectIdx) {
     int insertIndex = (cmdnum - 1) % HISTORY_SIZE;
-    cmdTuple hist;
-    hist.cmdnum = cmdnum;
+    cmdTuple *hist = malloc(sizeof(cmdTuple));
+    hist->line = malloc(MAX_LINE*sizeof(char));
+    hist->cmdnum = cmdnum;
     int err = 0;
     if (erroneousCmd(cmdnum)) {
         err = 1;
     }
-    hist.error = err;
-    hist.type = type;
-    hist.bg = bg;
-    hist.redirectIdx = redirectIdx;
-    memcpy(hist.args, args, numargs*sizeof(args[0]));
-    hist.args[numargs] = NULL;	// null-terminate args array
-    hist.numargs = numargs;
+    hist->error = err;
+    hist->type = type;
+    hist->bg = bg;
+    hist->redirectIdx = redirectIdx;
+    printf("Line: %s\n", line);
+    strcpy(hist->line, line);
+    printf("hist->line: %s\n", line);
     history[insertIndex] = hist;
 }
 
@@ -170,6 +187,10 @@ void addToErrCmds(int cmdnum) {
 
 void addToJobs(pid_t pid, char **args, int numargs) {
     push(pid, args, numargs);
+}
+
+void cleanup() {
+	munmap(erroneous_cmd_num, sizeof(*erroneous_cmd_num));
 }
 
 int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
@@ -240,16 +261,14 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 		if (!bg) {
 			int status = 0;
 			waitpid(childPID, &status, 0);
-			//printf("Returned child status: %d\n", status);
 			int exit_status = WEXITSTATUS(status);
-			printf("Exit STATUS %i\n", exit_status);
 			if (exit_status == EXECVP_FAIL || exit_status == EXECVP_UNDEF_ERR) {
 			    return 1;
 			} else {
 			    return 0;
 			}
 		} else {
-		    printf("Process ID: %i\n", childPID);
+		    printf("Adding process %i to jobs\n", childPID);
 		    addToJobs(childPID, args, numargs);
 		    return 0;
 		}
@@ -260,7 +279,31 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 // 0 --> successful command; command added to history
 // -1 --> command not added to history for whatever reason
 // 1 --> exit the program
-void processCommand(char **args, int numargs, cmd_type type, int bg, int redirectIdx) {
+void processCommand(char *line, int bg_override) {
+
+    printf("processing line: %s\n", line);
+
+    char *args[20];
+    int bg;
+    cmd_type type = EXTERNAL;
+    int redirectIdx = -1;
+    
+    int numargs = parseline(line, args, &bg, &type, &redirectIdx);
+    
+    printf("processing line: %s\n", line);
+
+    
+    bg = (bg || bg_override);
+    
+    // Print statements for testing *******************
+	for (int i = 0; i < numargs; i++)
+		printf("\nArg[%d] = %s", i, args[i]);
+	if (bg)
+		printf("\nBackground enabled..\n");
+	else
+		printf("\nBackground not enabled \n");
+	printf("\n\n");
+	// END TESTING *************************************
     
     // Assume command will be successful
     int saveToHistory = 1;
@@ -269,8 +312,8 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
         // Loop through history and print the number and command
         printHistory();
     } else if (type == HISTACCESS) {
-        // Look for the command in history
-		cmdTuple *cmd = getHistory(atoi(args[0]));
+		saveToHistory = 0;	// We don't want to save these commands to history
+		cmdTuple *cmd = getHistory(atoi(args[0]));	// Look for the command in history
 		if (cmd != NULL) {
 			printf("command found in history: ");
 			// The command exists in history
@@ -278,14 +321,10 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
 			if (!cmd->error) {
 				// Not erroneous
 				// Print the command to be run to the screen
-				int i;
-				for (i = 0; i < cmd->numargs; i++) {
-					printf("%s ", cmd->args[i]);
-				}
-				printf("\n");
+				printf("%s\n", cmd->line);
 
 				// Recursively process the command
-				processCommand(cmd->args, cmd->numargs, cmd->type, (cmd->bg || bg), cmd->redirectIdx);
+				processCommand(cmd->line, bg);
 				
 				return;	
 			} else {
@@ -294,9 +333,7 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
 		} else {
 			printf("no command found in history\n");
 		}
-		
-		saveToHistory = 0;	// We don't want to save these commands to history
-        
+		        
     } else if (type == PWD) {
     
         size_t size = 100;	// 100 bytes should be plenty for the path
@@ -321,7 +358,6 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
             printf("%s\n", pwd);
         }
         
-        // Free buf
         free(buf);
     
     } else if (type == CD) {
@@ -349,34 +385,33 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
     } else if (type == JOBS) {
         showJobs();
     } else if (type == FG) {
-        // Get process id of the job to move to the foreground
+        // 1. Get process id of the job to move to the foreground
         pid_t procid;
         if (args[1] == NULL) {
+            // No pid entered - bring latest background job to foreground
             procid = getLast();
             printf("Getting the latest process added to background...\n");
         } else {
             procid = atoi(args[1]);
             if (procid == 0) {
-                printf("Error: invalid argument passed to fg\n");
+                printf("Error: invalid argument passed to fg: %s\n", args[1]);
                 return;
             }
         }
         
-        // See if process is still running        
+        // 2. See if process is still running and handle     
         kill(procid, 0);
         if (errno == ESRCH) {
-            // The process doesn't exist
             printf("Process %i has already terminated\n", procid);
         } else {
             int status = 0;
             waitpid(procid, &status, 0);
         }
     } else if (type == EXIT) {
+        cleanup();
         exit(EXIT_SUCCESS);
     } else if (type == EXTERNAL) {
-        int pid = 0;
         int err = runCmd(args, numargs, cmdcount, bg, redirectIdx);
-        printf("After runcmd\n");
         if (err) {
             saveToHistory = 0;
         }
@@ -384,11 +419,10 @@ void processCommand(char **args, int numargs, cmd_type type, int bg, int redirec
     
     // Add the command to history
     if (saveToHistory) {
-        printf("Saving to history: %s\n", args[0]);
-        addToHistory(cmdcount, type, bg, redirectIdx, args, numargs);
+        printf("Saving to history: %s\n", line);
+        addToHistory(line, cmdcount, type, bg, redirectIdx);
         cmdcount++;
-    }
-    
+    }  
 }
 
 /*void handle_SIGTSTP(int sig) {
@@ -459,19 +493,15 @@ void handle_SIGUSR1(int sig) {
 
 }
 
-void cleanup() {
-	munmap(erroneous_cmd_num, sizeof(*erroneous_cmd_num));
-}
-
 int main() {
 
-    char *args[20];
-    int bg;
-    int redirectIdx;
-    int cnt;
-    cmd_type type;;
-    int result = 0;
+    //char *args[20];
+    //int bg;
+    //int redirectIdx;
+    //int cnt;
+    //cmd_type type;;
     
+    // Set up signals and hangling ****************
     //void handle_SIGTSTP(int);
     void handle_SIGINT(int);
     //void handle_SIGCHLD(int);
@@ -482,35 +512,21 @@ int main() {
     //signal(SIGCHLD, handle_SIGCHLD);
     signal(SIGUSR1, handle_SIGUSR1);
     
+    // Set up shared variable *****************
     erroneous_cmd_num = mmap(NULL, sizeof(*erroneous_cmd_num), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    
     *erroneous_cmd_num = 0;
 
+	// Loop until user exits ****************
     while (1) {
         
-        type = EXTERNAL; 		// Assume commands are external by default
-        redirectIdx = -1;		// Assume no redirection by default
-        //args = malloc(MAX_ARGS*sizeof(char *));
-        cnt = getcmd("\n>>  ", args, &bg, &type, &redirectIdx);
+        //type = EXTERNAL; 		// Assume commands are external by default
+        //redirectIdx = -1;		// Assume no redirection by default
         
-		// Print statements for testing *******************
-		for (int i = 0; i < cnt; i++)
-			printf("\nArg[%d] = %s", i, args[i]);
-		if (bg)
-			printf("\nBackground enabled..\n");
-		else
-			printf("\nBackground not enabled \n");
-		printf("\n\n");
-		// END TESTING *************************************
+        char *line = getcmd("\n>>  ");	// Read a line from stdin
 		
-		processCommand(args, cnt, type, bg, redirectIdx);
+		processCommand(line, 0);/*, cnt, type, bg, redirectIdx);*/
 		
-		//freecmd(args, cnt);
+		free(line);
 				 
-	}
-	
-	cleanup();
-		
-	return 0;
-     
+	}     
 }
