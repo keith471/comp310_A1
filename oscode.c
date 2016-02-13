@@ -7,7 +7,6 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
-#include "helpers.h"
 #include "list.h"
 
 #define MAX_LINE 100	// 100 characters for a line. This should be plenty
@@ -174,9 +173,7 @@ void addToHistory(char *line, int cmdnum, cmd_type type, int bg, int redirectIdx
     hist->type = type;
     hist->bg = bg;
     hist->redirectIdx = redirectIdx;
-    printf("Line: %s\n", line);
     strcpy(hist->line, line);
-    printf("hist->line: %s\n", line);
     history[insertIndex] = hist;
 }
 
@@ -185,15 +182,15 @@ void addToErrCmds(int cmdnum) {
     err_cmds[insertIndex] = cmdnum;
 }
 
-void addToJobs(pid_t pid, char **args, int numargs) {
-    push(pid, args, numargs);
+void addToJobs(pid_t pid, char *line) {
+    push(pid, line);
 }
 
 void cleanup() {
 	munmap(erroneous_cmd_num, sizeof(*erroneous_cmd_num));
 }
 
-int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
+int runCmd(char *line, char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 
     pid_t childPID;
 	int err = 0;
@@ -202,8 +199,8 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 	if (childPID < 0) {
 		fprintf(stderr, "The fork failed");
 	} else if (childPID == 0) {
-	    printf("Parent pid: %d\n", getppid());
-	    printf("Child pid: %d\n", getpid());
+	    //printf("Parent pid: %d\n", getppid());
+	    //printf("Child pid: %d\n", getpid());
 		// Child process
 		// If redirectIdx != -1, then the output of all the commands should go elsewhere
 		if (redirectIdx != -1) {
@@ -269,7 +266,7 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 			}
 		} else {
 		    printf("Adding process %i to jobs\n", childPID);
-		    addToJobs(childPID, args, numargs);
+		    addToJobs(childPID, line);
 		    return 0;
 		}
 	}
@@ -281,17 +278,12 @@ int runCmd(char *args[], int numargs, int cmdcount, int bg, int redirectIdx) {
 // 1 --> exit the program
 void processCommand(char *line, int bg_override) {
 
-    printf("processing line: %s\n", line);
-
     char *args[20];
     int bg;
     cmd_type type = EXTERNAL;
     int redirectIdx = -1;
     
     int numargs = parseline(line, args, &bg, &type, &redirectIdx);
-    
-    printf("processing line: %s\n", line);
-
     
     bg = (bg || bg_override);
     
@@ -411,7 +403,7 @@ void processCommand(char *line, int bg_override) {
         cleanup();
         exit(EXIT_SUCCESS);
     } else if (type == EXTERNAL) {
-        int err = runCmd(args, numargs, cmdcount, bg, redirectIdx);
+        int err = runCmd(line, args, numargs, cmdcount, bg, redirectIdx);
         if (err) {
             saveToHistory = 0;
         }

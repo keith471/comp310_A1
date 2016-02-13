@@ -3,13 +3,14 @@
 #include <stdio.h>
 #include <signal.h>
 #include <errno.h>
-#include "helpers.h"
 #include "list.h"
+
+#define MAX_LINE 100
 
 Node* head = NULL;
 Node* tail = NULL;
 
-void push(pid_t pid, char **args, int numargs) {
+void push(pid_t pid, char *line) {
     if (head == NULL) {
         head = (Node*) malloc(sizeof(Node));
         tail = head;
@@ -18,17 +19,10 @@ void push(pid_t pid, char **args, int numargs) {
         tail->next = (Node*) malloc(sizeof(Node));
         tail = tail->next;
     }
-    
-    printf("sizeof(args) = %lu\n", sizeof(args));
-    printf("sizeof(tail->args) before = %lu\n", sizeof(tail->args));
-    printf("tail-args address before: %p\n", tail->args);
-    memcpy(tail->args, args, numargs*sizeof(char *));
-    printf("sizeof(tail->args) after = %lu\n", sizeof(tail->args));
-    printf("tail-args address after: %p\n", tail->args);
-    tail->args[numargs] = NULL;
+    tail->line = malloc(MAX_LINE*sizeof(char));
+    strcpy(tail->line, line);
     tail->pid = pid;
-    tail->numargs = numargs;
-    tail->next = NULL;
+    tail->next = NULL;	// tail->next should always be null
 }
 
 int find(pid_t pid) {
@@ -55,10 +49,8 @@ int del(int index) {
     if (index == 0) {
         delete = head;
         head = head->next;
-        printf("sizeof(delete->args) = %lu\n", sizeof(delete->args));
-        printf("delete->args address: %p\n", delete->args);
-        //free(delete->args);
-        //free(delete);
+        free(delete->line);
+        free(delete);
         return 0;
     }
 
@@ -75,8 +67,8 @@ int del(int index) {
     }
 
     it->next = delete->next;
-    //free(delete->args);
-    //free(delete);
+    free(delete->line);
+    free(delete);
 
     return 0;
 }
@@ -89,16 +81,16 @@ void showJobs() {
     Node *curr = head;
     int index = 0;
     while (curr != NULL) {
-        printf("Here\n");
     	// WNOHANG causes waitpid to return immediately. 0 is returned if the child with
     	// given pid exists
         if (waitpid(curr->pid, NULL, WNOHANG) == 0) {
             printf("[%i] ", curr->pid);
-            printCommand(curr->args, curr->numargs);
+            printf("%s", curr->line);
             curr = curr->next;
         } else {
             curr = curr->next;	// Get the next node before deleting the current one
             del(index);
         }
+        index++;
     }
 }

@@ -1,4 +1,4 @@
-SRC := oscode.c list.c helpers.c
+SRC := oscode.c list.c
 OUT := oscode
 CFLAGS := -std=c99 -g
 
